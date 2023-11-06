@@ -1,0 +1,13 @@
+#ifndef BUZZER_H_
+#define BUZZER_H_
+
+#include "std_types.h"
+#include "common_macros.h"
+#include <avr/io.h>
+
+#define BUZZER_PIN PIN0
+#define BUZZER_PORT PORTA
+
+
+
+#endif /* BUZZER_H_ */

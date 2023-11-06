@@ -1,0 +1,35 @@
+#include "std_types.h"
+
+/*******************************************************************************
+ *                          	 Definitions                                   *
+ *******************************************************************************/
+#define TICKS_PER_SECOND 7812
+#define INITIAL_VALUE_FOR_SECOND 0
+
+/*******************************************************************************
+ *                          Type Definitions                                   *
+ *******************************************************************************/
+typedef enum {TIMER1_NORMAL_MODE = 0, TIMER1_COMP_MODE = 1} Timer1_Mode;
+
+
+typedef enum {TIMER1_NO_CLOCK, TIMER1_NO_PRESCALER, TIMER1_8_PRESCALER, TIMER1_64_PRESCALER,
+                TIMER1_256_PRESCALER, TIMER1_1024_PRESCALER} Timer1_Prescaler;
+
+
+typedef struct { 
+    uint16 initial_value;
+    uint16 compare_value; // it will be used in compare mode only.
+    Timer1_Prescaler prescaler;
+    Timer1_Mode mode;
+} Timer1_ConfigType;
+
+
+
+/*******************************************************************************
+ *                      Functions Definitions                                  *
+ *******************************************************************************/
+
+void Timer1_init(const Timer1_ConfigType * Config_Ptr);
+
+void Timer1_deInit(void);
+void Timer1_setCallBack(void(*a_ptr)(void));

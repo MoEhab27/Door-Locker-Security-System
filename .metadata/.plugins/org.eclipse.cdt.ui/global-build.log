@@ -1,0 +1,105 @@
+In file included from ../CONTROL_ECU.c:15:
+c:/winavr-20100110/lib/gcc/../../avr/include/util/delay.h:90:3: warning: #warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+In file included from ../CONTROL_ECU.c:18:
+../external_eeprom.h:23:1: warning: "SUCCESS" redefined
+In file included from ../dc_motor.h:16,
+                 from ../CONTROL_ECU.c:11:
+../std_types.h:27:1: warning: this is the location of the previous definition
+../CONTROL_ECU.c: In function 'verify_login_password':
+../CONTROL_ECU.c:181: warning: passing argument 1 of 'UART_receiveString' from incompatible pointer type
+../CONTROL_ECU.c:182: warning: passing argument 1 of 'retrieve_password' from incompatible pointer type
+../CONTROL_ECU.c:186: warning: passing argument 1 of 'validate_match_passwords' from incompatible pointer type
+../CONTROL_ECU.c:186: warning: passing argument 2 of 'validate_match_passwords' from incompatible pointer type
+Finished building: ../CONTROL_ECU.c
+ 
+Building file: ../buzzer.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"buzzer.d" -MT"buzzer.o" -c -o "buzzer.o" "../buzzer.c"
+Finished building: ../buzzer.c
+ 
+Building file: ../dc_motor.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"dc_motor.d" -MT"dc_motor.o" -c -o "dc_motor.o" "../dc_motor.c"
+Finished building: ../dc_motor.c
+ 
+Building file: ../external_eeprom.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"external_eeprom.d" -MT"external_eeprom.o" -c -o "external_eeprom.o" "../external_eeprom.c"
+In file included from ../external_eeprom.c:12:
+../external_eeprom.h:23:1: warning: "SUCCESS" redefined
+In file included from ../external_eeprom.h:17,
+                 from ../external_eeprom.c:12:
+../std_types.h:27:1: warning: this is the location of the previous definition
+Finished building: ../external_eeprom.c
+ 
+Building file: ../gpio.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"gpio.d" -MT"gpio.o" -c -o "gpio.o" "../gpio.c"
+Finished building: ../gpio.c
+ 
+Building file: ../pwm.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"pwm.d" -MT"pwm.o" -c -o "pwm.o" "../pwm.c"
+Finished building: ../pwm.c
+ 
+Building file: ../timer1.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"timer1.d" -MT"timer1.o" -c -o "timer1.o" "../timer1.c"
+../timer1.c: In function 'Timer1_setCallBack':
+../timer1.c:61: warning: function return types not compatible due to 'volatile'
+Finished building: ../timer1.c
+ 
+Building file: ../twi.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"twi.d" -MT"twi.o" -c -o "twi.o" "../twi.c"
+Finished building: ../twi.c
+ 
+Building file: ../uart.c
+Invoking: AVR Compiler
+avr-gcc -Wall -g2 -gstabs -O0 -fpack-struct -fshort-enums -ffunction-sections -fdata-sections -std=gnu99 -funsigned-char -funsigned-bitfields -mmcu=atmega32 -DF_CPU=8000000UL -MMD -MP -MF"uart.d" -MT"uart.o" -c -o "uart.o" "../uart.c"
+Finished building: ../uart.c
+ 
+Building target: CONTROL_ECU.elf
+Invoking: AVR C Linker
+avr-gcc -Wl,-Map,CONTROL_ECU.map -mmcu=atmega32 -o "CONTROL_ECU.elf"  ./CONTROL_ECU.o ./buzzer.o ./dc_motor.o ./external_eeprom.o ./gpio.o ./pwm.o ./timer1.o ./twi.o ./uart.o   
+Finished building target: CONTROL_ECU.elf
+ 
+Invoking: AVR Create Extended Listing
+avr-objdump -h -S CONTROL_ECU.elf  >"CONTROL_ECU.lss"
+Finished building: CONTROL_ECU.lss
+ 
+Invoking: Print Size
+avr-size --format=avr --mcu=atmega32 CONTROL_ECU.elf
+AVR Memory Usage
+----------------
+Device: atmega32
+
+Program:    9066 bytes (27.7% Full)
+(.text + .data + .bootloader)
+
+Data:        279 bytes (13.6% Full)
+(.data + .bss + .noinit)
+
+
+Finished building: sizedummy
+ 
+
+16:08:42 Build Finished. 0 errors, 10 warnings. (took 1s.988ms)
+
+16:08:43 **** Incremental Build of configuration Debug for project CONTROL_ECU ****
+make all 
+Invoking: Print Size
+avr-size --format=avr --mcu=atmega32 CONTROL_ECU.elf
+AVR Memory Usage
+----------------
+Device: atmega32
+
+Program:    9066 bytes (27.7% Full)
+(.text + .data + .bootloader)
+
+Data:        279 bytes (13.6% Full)
+(.data + .bss + .noinit)
+
+
+Finished building: sizedummy
+ 

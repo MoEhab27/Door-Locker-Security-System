@@ -1,0 +1,54 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include "timer1.h"
+#include "common_macros.h"
+#include "std_types.h"
+
+
+
+/*******************************************************************************
+ *                           Global Variables                                  *
+ *******************************************************************************/
+
+/* Global variables to hold the address of the call back function in the application */
+static volatile void (*g_callBackPtr)(void) = NULL_PTR;
+
+
+/*******************************************************************************
+ *                       Interrupt Service Routines                            *
+ *******************************************************************************/
+
+ISR(TIMER0_CAPT_vect)
+{
+	if(g_callBackPtr != NULL_PTR)
+	{
+		/* Call the Call Back function in the application after the edge is detected */
+		(*g_callBackPtr)(); /* another method to call the function using pointer to function g_callBackPtr(); */
+	}
+}
+
+ISR(TIMER0_COMPA_vect)
+{
+	if(g_callBackPtr != NULL_PTR)
+	{
+		/* Call the Call Back function in the application after the edge is detected */
+		(*g_callBackPtr)(); /* another method to call the function using pointer to function g_callBackPtr(); */
+	}
+}
+
+/*******************************************************************************
+ *                      Functions Definitions                                  *
+ *******************************************************************************/
+
+void Timer0_setCallBack(void(*a_ptr)(void))
+{
+	/* Save the address of the Call back function in a global variable */
+	g_callBackPtr = a_ptr;
+}
+
+
+
+
+void Timer0_init(const Timer0_ConfigType * Config_Ptr){
+	
+}

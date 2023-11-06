@@ -1,0 +1,277 @@
+ /******************************************************************************
+ *
+ *
+ * File Name: CONTROL_ECU.c
+ *
+ * Description: Source file for CONTROL ECU in door security system
+ *
+ * Author: Mohamed Ehab
+ *
+ *******************************************************************************/
+
+#include "dc_motor.h"
+#include "pwm.h"
+#include "uart.h"
+#include "buzzer.h"
+#include <util/delay.h>
+#include <avr/io.h>
+#include "uart_communication_codes.h"
+#include "external_eeprom.h"
+#include "timer1.h"
+#include "gpio.h"
+
+#define EEPROM_PASSWORD_START_ADDRESS 0x0AF2
+
+
+
+/*******************************************************************************
+ *                      Global Variables                                       *
+ *******************************************************************************/
+
+
+/* Initialize Timer 1 Configurations */
+Timer1_ConfigType timer1_configurations = {INITIAL_VALUE_FOR_SECOND, TICKS_PER_SECOND,
+		TIMER1_1024_PRESCALER, TIMER1_COMP_MODE};
+
+
+UART_ConfigType uart_configurations = {UART_BIT_DATA_8_BITS, UART_PARIY_DISABLED,
+UART_STOP_BIT_ONE_BIT, UART_BAUD_RATE_9600};
+
+uint8 g_timer_ticks = 0;
+uint8 passwords[11];
+
+
+
+/*******************************************************************************
+ *                      Functions Definitions                                  *
+ *******************************************************************************/
+
+/*
+ * Description :
+ * Function	to check if the two entered passwords equal each other
+ */
+bool validate_passwords(uint8* passwords);
+/*
+ * Description :
+ * Function	to stor the password in the EEPROM
+ */
+void store_password(uint8* passwords);
+/*
+ * Description :
+ * Function	compare the entered password with the one stored in the memory
+ */
+bool login_verify(void);
+/*
+ * Description :
+ * Function	to activate the dc motor 15 seconds CW then hold it for 3 seconds then activate again ACW
+ */
+void open_door(void);
+/*
+ * Description :
+ * Call back Function for timer to increase seconds
+ */
+void timer_increase_ticks(void);
+/*
+ * Description :
+ * Function	to stop the system and trigger alarm if the user entered his password 3 times wrong
+ */
+void activate_alarm(void);
+/*
+ * Description :
+ * Function	to change the password and send it to the control ECU
+ */
+bool change_password(uint8* new_password);
+/*
+ * Description :
+ * Function	to check if the new entered password are equals
+ */
+bool validate_new_passwords(uint8* passwords);
+
+
+
+int main(){
+	/* Enable global interrupt */
+	SREG |= (1 << 7);
+
+
+	UART_init(&uart_configurations);
+	DcMotor_Init();
+	Buzzer_init();
+	uint8 command;
+	/* Validate the passwords created when the system runs first*/
+	/* Every time validation fails we validate the new passwords */
+	while (validate_passwords(passwords) != TRUE){}
+	/* If the validation succeeds we store the password in the memory */
+	store_password(passwords);
+
+	/* Program Loop */
+	for(;;){
+		/* Receive byte from HMI ECU and decide what to do */
+		command = UART_recieveByte();
+		if(command == UART_LOGIN){
+			if(login_verify()){ /* verify login info */
+				UART_sendByte(UART_LOGIN_SUCCESS);
+			}
+			else{
+				UART_sendByte(UART_LOGIN_FAIL);
+			}
+		}
+		else if(command == UART_OPEN_DOOR){ /* Trigger dc_motor to open the door */
+			open_door();
+		}
+		else if(command == UART_ACTIVATE_ALARM){/* trigger buzzer for alarm */
+			activate_alarm();
+		}
+		else if(command == UART_CHANGE_PASSWORD){ /* Change the password in the memory */
+			UART_sendByte(UART_CHANGE_PASSWORD_CONFIRMATION);
+			UART_receiveString(passwords);
+			if(validate_new_passwords(passwords) == TRUE){
+				UART_sendByte(UART_PASSWORD_CHANGED);
+				store_password(passwords);
+			}
+			else{
+				UART_sendByte(UART_PASSWORD_NOT_CHANGED);
+			}
+
+		}
+
+	}
+}
+/*
+ * Description :
+ * Function	to check if the new entered password are equals
+ */
+bool validate_new_passwords(uint8* passwords){
+	for(int i = 0; i < 5; i++){
+		if(passwords[i] != passwords[i+5]){
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+/*
+ * Description :
+ * Function	to change the password and send it to the control ECU
+ */
+bool change_password(uint8* new_password){
+	uint8 new_passwords[11];
+	UART_sendByte(UART_CONFIRMATION);
+	UART_receiveString(new_passwords);
+	for(int i = 0; i < 5; i++){
+		if(new_passwords[i] != new_passwords[i+5]){
+			UART_sendByte(UART_INVALID_PASSWORDS);
+			return FALSE;
+		}
+		UART_sendByte(UART_VALID_PASSWORDS);
+		for(int i = 0; i < 5; i++){
+			new_password[i] = new_passwords[i];
+		}
+		return TRUE;
+	}
+}
+
+/*
+ * Description :
+ * Function	to stop the system and trigger alarm if the user entered his password 3 times wrong
+ */
+void activate_alarm(void){
+	g_timer_ticks = 0;
+	Timer1_setCallBack(timer_increase_ticks);
+	Timer1_init(&timer1_configurations);
+	Buzzer_on();
+	while(g_timer_ticks < 3){}
+	Buzzer_off();
+	g_timer_ticks = 0;
+}
+
+/*
+ * Description :
+ * Function	to check if the two entered passwords equal each other
+ */
+bool validate_passwords(uint8* passwords){
+	/* Wait for syncing command from the HMI ECU */
+	while(UART_recieveByte() != UART_NEW_PASSWORD){}
+	/* Confirm Syncing */
+	UART_sendByte(UART_CONFIRMATION);
+	/* Receive passwords */
+	UART_receiveString(passwords);
+	/* Check if the first password is the same as the second */
+	for(int i = 0; i < 5; i++){
+		if(passwords[i] != passwords[i + 5]){
+			UART_sendByte(UART_INVALID_PASSWORDS);
+			return FALSE;
+		}
+	}
+	UART_sendByte(UART_VALID_PASSWORDS);
+	return TRUE;
+}
+/*
+ * Description :
+ * Function	compare the entered password with the one stored in the memory
+ */
+bool login_verify(){
+	uint8 stored_password[5];
+	uint8 received_password[6];
+	uint8 data;
+	for(int i = 0; i < 5; i++){
+		EEPROM_readByte(EEPROM_PASSWORD_START_ADDRESS + i, &data);
+		_delay_ms(10);
+		stored_password[i] = data;
+	}
+	UART_sendByte(UART_CONFIRMATION);
+	UART_receiveString(received_password);
+	for(int i = 0; i < 5; i++){
+		if(stored_password[i] != received_password[i]){
+			UART_sendByte(UART_LOGIN_FAIL);
+			return FALSE;
+		}
+	}
+//	UART_sendByte(UART_LOGIN_SUCCESS);
+	return TRUE;
+}
+/*
+ * Description :
+ * Function	to activate the dc motor 15 seconds CW then hold it for 3 seconds then activate again ACW
+ */
+void open_door(void){
+	g_timer_ticks = 0;
+	/* Start the timer */
+	Timer1_init(&timer1_configurations);
+	Timer1_setCallBack(timer_increase_ticks);
+	/* Rotate the motor 15 seconds clockwise */
+	DcMotor_Rotate(DC_MOTOR_CLOCKWISE, 100);
+	while(g_timer_ticks < 5){}
+	g_timer_ticks = 0;
+	/* hold the motor */
+	DcMotor_Rotate(DC_MOTOR_STOP, 0);
+	while(g_timer_ticks  < 3){}
+	g_timer_ticks = 0;
+	/* Rotate the motor 15 seconds anti clockwise */
+	DcMotor_Rotate(DC_MOTOR_ANTI_CLOCKWISE, 100);
+	while(g_timer_ticks < 5){}
+	/* stop the motor */
+	DcMotor_Rotate(DC_MOTOR_STOP, 0);
+	/* stop the timer */
+	g_timer_ticks = 0;
+	Timer1_deInit();
+}
+/*
+ * Description :
+ * Function	to stor the password in the EEPROM
+ */
+void store_password(uint8* passwords){
+	for(int i = 0; i < 5; i++){
+		EEPROM_writeByte(EEPROM_PASSWORD_START_ADDRESS + i, passwords[i]);
+		_delay_ms(10);
+	}
+}
+/*
+ * Description :
+ * Call back Function for timer to increase seconds
+ */
+void timer_increase_ticks(void){
+	g_timer_ticks++;
+}
+
+
+

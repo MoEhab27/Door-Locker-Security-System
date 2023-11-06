@@ -1,0 +1,13 @@
+#include "lcd.h"
+#include "keypad.h"
+#include "util/delay.h"
+
+int main(){
+	LCD_init();
+	while(1){
+		char x;
+		x = KEYPAD_getPressedKey();
+		LCD_intgerToString(x);
+		_delay_ms(250);
+	}
+}

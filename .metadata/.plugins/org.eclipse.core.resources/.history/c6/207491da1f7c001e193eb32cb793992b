@@ -1,0 +1,449 @@
+#include "keypad.h"
+#include "lcd.h"
+#include "uart.h"
+#include "timer1.h"
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include "uart_communication_codes.h"
+
+/*******************************************************************************
+ *                      Global Variables                                       *
+ *******************************************************************************/
+
+uint8 g_timer_ticks = 0;
+uint8 g_password_trails = 0;
+
+/*Set UART Configurations*/
+UART_ConfigType uart_configurations = {UART_BIT_DATA_8_BITS, UART_PARIY_DISABLED,
+UART_STOP_BIT_ONE_BIT, UART_BAUD_RATE_9600};
+/*
+ * For System Clock=8Mhz and timer prescaler is F_CPU/1024.
+ * Timer frequency will be around 8Khz, Ttimer = 128 us
+ * For compare value equals to 7812 the timer will generate compare match interrupt every one second.
+ */
+/* Initialize Timer 1 Configurations */
+Timer1_ConfigType timer1_configurations = {INITIAL_VALUE_FOR_SECOND, TICKS_PER_SECOND,
+		TIMER1_1024_PRESCALER, TIMER1_COMP_MODE};
+
+
+
+/*******************************************************************************
+ *                      Functions Definitions                                  *
+ *******************************************************************************/
+
+
+/*
+ * Description :
+ * Function	to take password from user and store it in array
+ */
+void create_password(uint8* passwords);
+/*
+ * Description :
+ * Function	to check if the two entered passwords match
+ */
+bool verify_passwords(uint8* passwords);
+/*
+ * Description :
+ * Function	to display message if passwords don't match
+ */
+void display_umatched_passwords(void);
+/*
+ * Description :
+ * Function	to display message if passwords do match
+ */
+void display_passwords_match_message(void);
+/*
+ * Description :
+ * Function	to display the program menu
+ */
+void display_program_menu(void);
+/*
+ * Description :
+ * Function	to verify the login password with the control ECU
+ */
+bool login_verify(void);
+/*
+ * Description :
+ * Call back Function for timer to increase seconds
+ */
+void timer_increase_ticks(void);
+/*
+ * Description :
+ * Function	to activate the dc motor 15 seconds CW then hold it for 3 seconds then activate again ACW
+ */
+void open_door(void);
+/*
+ * Description :
+ * Function	to stop the system and trigger alarm if the user entered his password 3 times wrong
+ */
+void activate_alarm();
+/*
+ * Description :
+ * Function	to change the password and send it to the control ECU
+ */
+void change_password(uint8* passwords);
+
+
+
+int main() {
+
+	/*
+	 *  Array to hold the passwords
+	 *  # -> Where the other UART stops receiving bytes
+	 *  '\0' -> where the UART stops sending bytes
+	*/
+	/* array to hold the passwords entered by the user */
+	uint8 passwords[12];
+	passwords[10] = '#';
+	passwords[11] = '\0';
+
+	uint8 pressed_key;
+
+	/* Enable Global Interrupt */
+	SREG |= (1 << 7);
+	/* initialize the UART Driver  */
+	UART_init(&uart_configurations);
+
+	/*Initialize the LCD*/
+	LCD_init();
+
+
+	/* Create the pass when the system runs at first */
+	create_password(passwords);
+	/* While the passwords doesn't match repeat creating password */
+	while(verify_passwords(passwords) != TRUE){
+		display_umatched_passwords();
+		create_password(passwords);
+	}
+	/* Display password creation success message */
+	display_passwords_match_message();
+
+	/* Program Loop */
+	for(;;){
+		display_program_menu();
+		_delay_ms(250);
+		pressed_key = KEYPAD_getPressedKey();
+		switch(pressed_key){
+		case('+'):/* open the door */
+			/* Check for password verification */
+			if(login_verify()){
+				LCD_displayString("Verified...");
+				open_door();
+			}
+			else{
+
+				g_password_trails++;
+				LCD_clearScreen();
+
+				/*allow the user to enter the password 3 times only*/
+				while(g_password_trails < 3){
+					LCD_displayString("Wrong password");
+					_delay_ms(700);
+					if(login_verify()){
+						open_door();
+						g_password_trails = 0;
+						break;
+					}
+					else{
+						g_password_trails++;
+						/*If the two passwords are not matched for the third consecutive time, then trigger the alarm
+						 * and freeze the system */
+						if(g_password_trails == 3){
+							activate_alarm();
+							g_password_trails = 0;
+							break;
+						}
+					}
+				}
+			}
+			break;
+
+
+		case('-'): /* Change password case */
+			/* Check for password verification */
+			if(login_verify()){
+				change_password(passwords);
+			}
+			else{
+				g_password_trails++;
+				while(g_password_trails < 3){
+					LCD_displayString("Wrong password");
+					_delay_ms(700);
+					if(login_verify()){
+						change_password(passwords);
+						g_password_trails = 0;
+						break;
+					}
+					else{
+						g_password_trails++;
+						if(g_password_trails == 3){
+							/*If the two passwords are not matched for the third consecutive time, then trigger the alarm
+							 * and freeze the system */
+							activate_alarm();
+							g_password_trails = 0;
+							break;
+						}
+					}
+				}
+			}
+			break;
+		default:
+			/* if the user didn't choose '-' or '+' the only options available */
+			LCD_clearScreen();
+			LCD_displayString("invalid choice..");
+			_delay_ms(1000);
+		}
+	}
+}
+/*
+ * Description :
+ * Function	to change the password and send it to the control ECU
+ */
+void change_password(uint8* passwords){
+	/*Send initial message to sync with the Control ECU */
+	UART_sendByte(UART_CHANGE_PASSWORD);
+	/* Wait for ECU confirmation syncing */
+	while(UART_recieveByte() != UART_CHANGE_PASSWORD_CONFIRMATION){}
+	_delay_ms(250);
+	/* Get the inputs from user */
+	create_password(passwords);
+	/*Send the two passwords to control ECU */
+	UART_sendString(passwords);
+	/* if they match */
+	if(UART_recieveByte() == UART_PASSWORD_CHANGED){
+		LCD_clearScreen();
+		LCD_displayString("Pass Changed");
+		_delay_ms(700);
+	}
+	/*if they don't match */
+	else{
+		LCD_clearScreen();
+		LCD_displayString("The two passes");
+		LCD_moveCursor(1, 0);
+		LCD_displayString("Didn't Match!");
+		_delay_ms(1000);
+	}
+}
+/*
+ * Description :
+ * Function	to stop the system and trigger alarm if the user entered his password 3 times wrong
+ */
+void activate_alarm(){
+	/* Reset the available trails */
+	g_timer_ticks = 0;
+	/* send alarm trigger code to control ECU */
+	UART_sendByte(UART_ACTIVATE_ALARM);
+	/* Start the timer module */
+	Timer1_setCallBack(timer_increase_ticks);
+	Timer1_init(&timer1_configurations);
+	LCD_clearScreen();
+	LCD_displayString("Error...");
+	LCD_moveCursor(1,0);
+	LCD_displayString("Alarm Activated");
+	/* wait for timer to count 60 seconds */
+	while(g_timer_ticks < 3){}
+	LCD_clearScreen();
+	/* de-initialize the timer*/
+	Timer1_deInit();
+	/* reset the seconds variable for next time */
+	g_timer_ticks = 0;
+}
+
+void create_password(uint8* passwords){
+	uint8 i = 0;
+	uint8 key;
+	/* Display LCD Messages */
+	LCD_clearScreen();
+	LCD_displayString("Create a Pass: ");
+	LCD_moveCursor(1, 0);
+
+	/*
+	 * Get the password from the user and store it
+	 * in the first 5 indices in the passwords array
+	 * */
+	while(i < 5){
+		key = KEYPAD_getPressedKey();
+		passwords[i] = key;
+		i++;
+		LCD_displayCharacter('*');
+		_delay_ms(250);
+	}
+	LCD_displayString("  Enter '='");
+
+	/* Wait for the user to press the enter key (=) */
+	while(KEYPAD_getPressedKey() != '='){}
+	_delay_ms(250);
+
+	/* Display the new LCD messages (confirm password) */
+	LCD_clearScreen();
+	LCD_moveCursor(0, 0);
+	LCD_displayString("Re-enter Pass: ");
+	LCD_moveCursor(1, 0);
+
+	/*
+	 * Get the password from the user and store it
+	 * in the second 5 indices in the passwords array
+	 * */
+	while(i < 10){
+		key = KEYPAD_getPressedKey();
+		passwords[i] = key;
+		i++;
+		LCD_displayCharacter('*');
+		_delay_ms(250);
+	}
+	LCD_displayString("  Enter '='");
+
+	/* Wait for the user to press the enter key (=) */
+	while(KEYPAD_getPressedKey() != '='){}
+	return;
+}
+
+
+/*
+ * Description :
+ * Function	to send the passwords to Control ECU and return the response
+ */
+bool verify_passwords(uint8* passwords){
+	/*Send initial message to sync with the Control ECU */
+	LCD_clearScreen();
+	LCD_displayString("sent");
+	UART_sendByte(UART_NEW_PASSWORD);
+	/* Wait for the response from Control ECU */
+	uint8 data = UART_recieveByte();
+	LCD_intgerToString(data);
+	while(data != UART_CONFIRMATION){}
+	LCD_clearScreen();
+	LCD_displayString("confirmed");
+	/* Send the passwords to the Control ECU */
+	UART_sendString(passwords);
+	/* Wait for the Control ECU response to validate passwords */
+	if(UART_recieveByte() == UART_VALID_PASSWORDS){
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/*
+ * Description :
+ * Function	to send the login password to Control ECU to verify it
+ */
+bool login_verify(void){
+	/*
+	 *  Array to hold the login password entered by the user
+	 *  # -> Where the other UART stops receiving bytes
+	 *  '\0' -> where the UART stops sending bytes
+	*/
+	uint8 password[7];
+	password[5] = '#';
+	password[6] = '\0';
+	/* Display message on the screen to take password and store it */
+	LCD_clearScreen();
+	LCD_displayString("Enter Pass: ");
+	_delay_ms(250);
+	LCD_moveCursor(1, 0);
+	for(int i = 0; i < 5; i++){
+		password[i] = KEYPAD_getPressedKey();
+		LCD_displayCharacter('*');
+		_delay_ms(250);
+	}
+	LCD_displayString(" Enter '='");
+	/* wait for the user to press enter key */
+	while(KEYPAD_getPressedKey() != '='){}
+
+	LCD_clearScreen();
+
+	/* Send the login command to sync with the control ECU*/
+
+	UART_sendByte(UART_LOGIN);
+
+	/* wait for the syncing confirmation */
+	while(UART_recieveByte() != UART_CONFIRMATION){}
+
+	/* Send the password to control ECU to compare it with the stored one */
+	UART_sendString(password);
+
+	if(UART_recieveByte() == UART_LOGIN_SUCCESS){
+		return TRUE;
+	}
+	else{
+		return FALSE;
+	}
+}
+/*
+ * Description :
+ * Function	to activate the dc motor 15 seconds CW then hold it for 3 seconds then activate again ACW
+ */
+void open_door(void){
+
+	LCD_moveCursor(1, 0);
+	LCD_displayString("Door Opening");
+	/* Send the command to open the door to control ECU */
+	UART_sendByte(UART_OPEN_DOOR);
+	/* start the timer */
+	Timer1_init(&timer1_configurations);
+	Timer1_setCallBack(timer_increase_ticks);
+	/* wait  15 seconds then display door is open */
+	while(g_timer_ticks < 5){}
+	g_timer_ticks = 0;
+	LCD_clearScreen();
+	LCD_displayString("Door Open");
+	while(g_timer_ticks  < 3){}
+	g_timer_ticks = 0;
+	LCD_clearScreen();
+	/* wait 3 seconds then close the door */
+	LCD_displayString("Door Closing");
+	while(g_timer_ticks < 5){}
+	LCD_clearScreen();
+	LCD_displayString("Door Closed");
+	g_timer_ticks = 0;
+	/* stop the timer */
+	Timer1_deInit();
+	_delay_ms(1000);
+}
+/*
+ * Description :
+ * Call back Function for timer to increase seconds
+ */
+void timer_increase_ticks(void){
+	g_timer_ticks++;
+}
+
+
+/*
+ * Function to display the program memory
+ */
+void display_program_menu(void){
+	LCD_clearScreen();
+	LCD_displayString("+ : Open Door");
+	LCD_moveCursor(1, 0);
+	LCD_displayString("- : Change Pass");
+}
+
+/*
+ * Function to display error message when the user enters unmatched passwords
+ */
+void display_umatched_passwords(void){
+	LCD_clearScreen();
+	LCD_displayString("Passes Don't");
+	LCD_moveCursor(1, 0);
+	LCD_displayString("Match, try again");
+	_delay_ms(1000);
+}
+
+/*
+ * Function to display success message when the user enters matched passwords
+ */
+void display_passwords_match_message(void){
+	LCD_clearScreen();
+	LCD_displayString("Pass Created");
+	LCD_moveCursor(1, 0);
+	LCD_displayString("Successfully");
+	_delay_ms(600);
+	LCD_clearScreen();
+}
+
+
+
+
+
+

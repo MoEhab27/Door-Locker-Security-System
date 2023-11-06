@@ -1,0 +1,12 @@
+#include "buzzer.h"
+#include <avr/io.h>
+
+
+void Buzzer_init(){
+	/* Set Buzzer pin to output pin*/
+	GPIO_setupPinDirection(PORTA, PIN0, PIN_OUTPUT);
+#ifdef BUZZER_PULL_UP_CONFIGS
+	
+#endif
+
+}

@@ -1,0 +1,381 @@
+/******************************************************************************
+ *
+ * File Name: CONTROL_ECU.c
+ *
+ * Description: Source file for CONTROL ECU in door security system
+ *
+ * Author: Mohamed Ehab
+ *
+ *******************************************************************************/
+
+#include "dc_motor.h"
+#include "pwm.h"
+#include "uart.h"
+#include "buzzer.h"
+#include <util/delay.h>
+#include <avr/io.h>
+#include "uart_communication_codes.h"
+#include "external_eeprom.h"
+#include "timer1.h"
+#include "gpio.h"
+
+#define EEPROM_PASSWORD_START_ADDRESS 0x0AF2
+
+/*******************************************************************************
+ *                      Global Variables                                       *
+ *******************************************************************************/
+
+uint8 g_timer_ticks = 0;
+
+/*
+ * For System Clock=8Mhz and timer prescaler is F_CPU/1024.
+ * Timer frequency will be around 8Khz, Ttimer = 128 us
+ * For compare value equals to 7812 the timer will generate compare match interrupt every one second.
+ */
+Timer1_ConfigType timer1_configurations = {INITIAL_VALUE_FOR_SECOND, TICKS_PER_SECOND,
+										   TIMER1_1024_PRESCALER, TIMER1_COMP_MODE};
+
+/*
+ * Initialize UART Configurations
+ * Frame data bits = 8 bits
+ * Parity = Disabled
+ * Stop bits = 1 bit
+ * Baud rate = 9600
+ */
+UART_ConfigType uart_configurations = {UART_BIT_DATA_8_BITS, UART_PARIY_DISABLED,
+									   UART_STOP_BIT_ONE_BIT, UART_BAUD_RATE_9600};
+
+/*******************************************************************************
+ *                      Functions Definitions                                  *
+ *******************************************************************************/
+
+/*
+ * Description : Call back Function to increase the timer ticks
+ * Inputs  : void
+ * Outputs : void
+ */
+void timer_increase_ticks(void);
+
+/*
+ * Description : open the door
+ * Inputs  : void
+ * Outputs : void
+ */
+void open_door(void);
+
+/*
+ * Description : Function to retrieve the password stored in the EEPROM
+ * Inputs  : uint8* password -> pointer to the password to store the retrieved password
+ * Outputs : None
+ */
+void retrieve_password(uint8 *password);
+
+/*
+ * Description : Function to store the password received from the HMI ECU in the EEPROM
+ * Inputs  : uint8* password -> pointer to the password to be stored
+ * Outputs : none
+ */
+void store_password(uint8 *password);
+
+/*
+ * Description : Function to trigger the alarm
+ * Inputs  : None
+ * Outputs : None
+ */
+void trigger_alarm(void);
+
+/*
+ * Description : Function match two passwords received from the HMI ECU
+ * Inputs  : uint8* first_password, uint8* second_password
+ * Outputs : bool
+ * 			 TRUE if the passwords are matched
+ * 		     else FALSE
+ */
+bool validate_match_passwords(uint8 *first_password, uint8 *second_password);
+
+/*
+ * Description : Function to create the password received from the HMI ECU
+ * 	             and store it in the EEPROM
+ * Inputs  : None
+ * Outputs : bool
+ * 			 TRUE if the password is matched
+ * 		     else FALSE
+ */
+bool create_password();
+
+/*
+ * Description : Function to validate the password received from the HMI ECU
+ * Inputs  : None
+ * Outputs : bool
+ * 			 TRUE if the password is correct
+ * 		     else FALSE
+ */
+bool verify_login_password();
+
+int main()
+{
+
+	uint8 command;
+	/* Enable global interrupt */
+	SREG |= (1 << 7);
+	/*
+	 * Drivers Initialization
+	 * UART, DcMotor, Buzzer
+	 */
+	UART_init(&uart_configurations);
+	DcMotor_Init();
+	Buzzer_init();
+	/*
+	 * Receive the command from the HMI ECU
+	 * Based on the command and decide what to do
+	 * 1. Login
+	 * 2. Create password
+	 * 3. Open door
+	 * 4. Activate alarm
+	 * 5. Change password
+	 */
+	/* Program Loop */
+	for (;;)
+	{
+		command = UART_recieveByte();
+		if (command == UART_LOGIN)
+		{
+			verify_login_password();
+		}
+		else if (command == UART_NEW_PASSWORD)
+		{
+			create_password();
+		}
+		else if (command == UART_OPEN_DOOR)
+		{
+			open_door();
+		}
+		else if (command == UART_ACTIVATE_ALARM)
+		{
+			trigger_alarm();
+		}
+	}
+}
+
+/*
+ * Description : Function to validate the password received from the HMI ECU
+ * Inputs  : None
+ * Outputs : bool
+ * 			 TRUE if the password is correct
+ * 		     else FALSE
+ */
+bool verify_login_password()
+{
+	/*
+	 * Arrays to store the password received from the HMI ECU and
+	 * the password stored in the EEPROM
+	 */
+	uint8 *password[6];
+	uint8 *received_password[6];
+	/*
+	 * Send the command to the HMI ECU to start sending the password
+	 * Receive the password from the HMI ECU
+	 * Retrieve the password from the EEPROM
+	 */
+	UART_sendByte(UART_CONFIRMATION);
+	UART_receiveString(received_password);
+	retrieve_password(password);
+	/*
+	 * Check if the two passwords are the same
+	 */
+	if (validate_match_passwords(password, received_password) == TRUE)
+	{
+		/*
+		 * Send confirmation to the HMI ECU
+		 * Return true to the main function
+		 */
+		UART_sendByte(UART_LOGIN_SUCCESS);
+		return TRUE;
+	}
+	/*
+	 * Send invalid password to the HMI ECU
+	 * Return false to the main function
+	 */
+	UART_sendByte(UART_LOGIN_FAIL);
+	return FALSE;
+}
+
+/*
+ * Description : Function to create the password received from the HMI ECU
+ * 	             and store it in the EEPROM
+ * Inputs  : None
+ * Outputs : bool
+ * 			 TRUE if the password is matched
+ * 		     else FALSE
+ */
+bool create_password()
+{
+	/*
+	 * Arrays to store the two passwords received from the HMI ECU
+	 */
+	uint8 first_password[6];
+	uint8 second_password[6];
+	/*
+	 * Send the command to the HMI ECU to start sending the passwords
+	 */
+	UART_sendByte(UART_CONFIRMATION);
+	/*
+	 * Receive the passwords from the HMI ECU
+	 */
+	UART_receiveString(first_password);
+	UART_receiveString(second_password);
+	/*
+	 * Check if the two passwords are the same
+	 */
+	if (validate_match_passwords(first_password, second_password) == TRUE)
+	{
+		/*
+		 * Store the password in the EEPROM
+		 * Send confirmation to the HMI ECU
+		 * Return true to the main function
+		 */
+		store_password(first_password);
+		UART_sendByte(UART_VALID_PASSWORDS);
+		return TRUE;
+	}
+	/*
+	 * Send invalid passwords to the HMI ECU
+	 * Return false to the main function
+	 */
+	UART_sendByte(UART_INVALID_PASSWORDS);
+	return FALSE;
+}
+
+/*
+ * Description : Function match two passwords received from the HMI ECU
+ * Inputs  : uint8* first_password, uint8* second_password
+ * Outputs : bool
+ * 			 TRUE if the passwords are matched
+ * 		     else FALSE
+ */
+bool validate_match_passwords(uint8 * first_password, uint8 * second_password)
+{
+	/*
+	 * loop on each character in the password and check if it is
+	 * the same as the other password
+	 */
+
+		for (int i = 0; i < 5; i++)
+	{
+		if (first_password[i] != second_password[i])
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+/*
+ * Description : Function to trigger the alarm
+ * Inputs  : None
+ * Outputs : None
+ */
+void trigger_alarm(void)
+{
+	/*
+	 * Start the timer
+	 * Start the buzzer
+	 * Wait for 60 seconds
+	 * Stop the timer
+	 * Stop the buzzer
+	 */
+	g_timer_ticks = 0;
+	Timer1_init(&timer1_configurations);
+	Timer1_setCallBack(timer_increase_ticks);
+	Buzzer_on();
+	while (g_timer_ticks < 60)
+	{
+	}
+	Buzzer_off();
+	g_timer_ticks = 0;
+	Timer1_deInit();
+}
+
+/*
+ * Description : Function to store the password received from the HMI ECU in the EEPROM
+ * Inputs  : uint8* password -> pointer to the password to be stored
+ * Outputs : none
+ */
+void store_password(uint8 * password)
+{
+	/*
+	 * loop on each character in the password and store it in the EEPROM
+	 */
+	for (int i = 0; i < 5; i++)
+	{
+		EEPROM_writeByte(EEPROM_PASSWORD_START_ADDRESS + i, password[i]);
+		_delay_ms(10);
+	}
+}
+
+/*
+ * Description : Function to retrieve the password stored in the EEPROM
+ * Inputs  : uint8* password -> pointer to the password to store the retrieved password
+ * Outputs : None
+ */
+void retrieve_password(uint8 * password)
+{
+	/*
+	 * loop on each character in the password and retrieve it from the EEPROM
+	 */
+	uint8 data;
+	for (int i = 0; i < 5; i++)
+	{
+		EEPROM_readByte(EEPROM_PASSWORD_START_ADDRESS + i, &data);
+		_delay_ms(10);
+		password[i] = data;
+	}
+}
+
+/*
+ * Description : open the door
+ * Inputs  : void
+ * Outputs : void
+ */
+void open_door(void)
+{
+	/*
+	 * Start the timer
+	 * Rotate the motor 15 seconds clockwise
+	 * hold the motor
+	 * Rotate the motor 15 seconds anti clockwise
+	 * stop the motor
+	 * stop the timer
+	 * reset the timer ticks
+	 */
+	g_timer_ticks = 0;
+	Timer1_init(&timer1_configurations);
+	Timer1_setCallBack(timer_increase_ticks);
+	DcMotor_Rotate(DC_MOTOR_CLOCKWISE, 100);
+	while (g_timer_ticks < 15)
+	{
+	}
+	g_timer_ticks = 0;
+	DcMotor_Rotate(DC_MOTOR_STOP, 0);
+	while (g_timer_ticks < 3)
+	{
+	}
+	g_timer_ticks = 0;
+	DcMotor_Rotate(DC_MOTOR_ANTI_CLOCKWISE, 100);
+	while (g_timer_ticks < 15)
+	{
+	}
+	DcMotor_Rotate(DC_MOTOR_STOP, 0);
+	g_timer_ticks = 0;
+	Timer1_deInit();
+}
+
+/*
+ * Description : Call back Function to increase the timer ticks
+ * Inputs  : void
+ * Outputs : void
+ */
+void timer_increase_ticks(void)
+{
+	g_timer_ticks++;
+}

@@ -1,0 +1,21 @@
+#include "buzzer.h"
+#include <avr/io.h>
+
+
+void Buzzer_init(void){
+	/* Set Buzzer pin to output pin*/
+	GPIO_setupPinDirection(PORTA, PIN0, PIN_OUTPUT);
+	/* Set the buzzer to be off in the beginning */
+	GPIO_writePin(PORTA, PIN0, LOGIC_LOW);
+}
+
+void Buzzer_on(void){
+	/* Set the buzzer pin to logic high */
+	GPIO_writePin(PORTA, PIN0, LOGIC_HIGH);
+}
+
+
+void Buzzer_off(void){
+	/* Set the buzzer pin to logic low */
+	GPIO_writePin(PORTA, PIN0, LOGIC_LOW);
+}
